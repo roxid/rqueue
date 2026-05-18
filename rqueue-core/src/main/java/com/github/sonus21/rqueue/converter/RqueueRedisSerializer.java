@@ -25,6 +25,7 @@ import org.springframework.data.redis.serializer.SerializationException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonGenerator;
 import tools.jackson.databind.DefaultTyping;
+import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationContext;
 import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
@@ -34,14 +35,35 @@ import tools.jackson.databind.ser.std.StdSerializer;
 @Slf4j
 public class RqueueRedisSerializer implements RedisSerializer<Object> {
 
+  /**
+   * Controls JSON property ordering for {@link com.github.sonus21.rqueue.core.RqueueMessage}
+   * serialisation. Configure via {@code rqueue.serialization.property.order}.
+   *
+   * <ul>
+   *   <li>{@link #ALPHABETICAL} — alphabetical order, Jackson 3.x native behaviour. This is the
+   *       default for RQueue 4.x.
+   *   <li>{@link #DECLARATION} — declaration order, matching Jackson 2.x / RQueue 3.x. Use when
+   *       upgrading from 3.x with messages still present in Redis queues.
+   * </ul>
+   */
+  public enum PropertyOrder {
+    ALPHABETICAL,
+    DECLARATION
+  }
+
   private final RedisSerializer<Object> serializer;
 
   public RqueueRedisSerializer(RedisSerializer<Object> redisSerializer) {
     this.serializer = redisSerializer;
   }
 
+  /** Creates a serialiser using {@link PropertyOrder#ALPHABETICAL} (Jackson 3.x default). */
   public RqueueRedisSerializer() {
-    this(new RqueueRedisSerDes());
+    this(PropertyOrder.ALPHABETICAL);
+  }
+
+  public RqueueRedisSerializer(PropertyOrder order) {
+    this(new RqueueRedisSerDes(order));
   }
 
   @Override
@@ -66,8 +88,8 @@ public class RqueueRedisSerializer implements RedisSerializer<Object> {
   private static class RqueueRedisSerDes implements RedisSerializer<Object> {
     private final ObjectMapper mapper;
 
-    RqueueRedisSerDes() {
-      this.mapper = SerializationUtils.getObjectMapper()
+    RqueueRedisSerDes(PropertyOrder order) {
+      var builder = SerializationUtils.getObjectMapper()
           .rebuild()
           .addModule(new SimpleModule().addSerializer(new NullValueSerializer()))
           .activateDefaultTyping(
@@ -75,8 +97,11 @@ public class RqueueRedisSerializer implements RedisSerializer<Object> {
                   .allowIfSubType(Object.class)
                   .build(),
               DefaultTyping.NON_FINAL,
-              As.PROPERTY)
-          .build();
+              As.PROPERTY);
+      if (order == PropertyOrder.DECLARATION) {
+        builder = builder.disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY);
+      }
+      this.mapper = builder.build();
     }
 
     @Override
